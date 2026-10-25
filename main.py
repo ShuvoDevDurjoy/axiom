@@ -1,10 +1,10 @@
-from nn.tensor import Tensor 
+from nn.tensor import Tensor as tf
 from nn.init import *
 from nn.modules.linear import Linear
 
 def main(): 
-    input = Tensor([1, 2], requires_grad=True)
-    out = input ** 2
+    input = tf([1.3, 2.6], dtype=tf.float32)
+    out = input ** 9
     print(out)
 
 

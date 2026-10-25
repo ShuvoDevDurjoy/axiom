@@ -1,13 +1,32 @@
 import numpy as np
+import cupy as cp
+from . import *
 
 class Tensor:
-    def __init__(self, data: np.ndarray, _childs: tuple = (), requires_grad = False, _op = None): 
-        self.data = np.asarray(data, dtype = np.float32)
+    float32 = float32
+    float64 = float64
+    float16 = float16
+    int32 = int32
+    int64 = int64
+    bool_ = bool_
+    def __init__(self, data: np.ndarray, _childs: tuple = (), requires_grad = False, _op = None, device = DEVICE, dtype = None): 
+        self.device = DEVICE if device not in ['cpu', 'cuda'] else device
+        self.xp = cp if self.device == 'cuda' else np
+        self.dtype = dtype
+        self._init_data(data)
         self._backward = lambda: None
-        self.grad = np.zeros_like(self.data) if requires_grad else None
+        self.grad = self.xp.zeros_like(self.data) if requires_grad else None
         self._prevs = set(_childs)
         self.requires_grad = requires_grad
         self._op = _op
+
+    def _init_data(self, data):
+        if self.dtype is None: 
+            self.dtype = getattr(data, 'dtype', self.float32)
+        if isinstance(data, self.xp.ndarray):
+            self.data = data.astype(self.dtype)
+        else: 
+            self.data = self.xp.asarray(data, dtype = self.dtype) 
 
     @property
     def T(self): 
@@ -20,11 +39,16 @@ class Tensor:
             axes = tuple(axes[0])
         else:
             axes = tuple(axes)
-        out = Tensor(np.transpose(self.data, axes), (self,), self.requires_grad, _op='transpose')
+        out = Tensor(self.xp.transpose(self.data, axes), (self,), self.requires_grad, _op='transpose')
         def _backward(): 
             if self.requires_grad: 
-                inverse_axes = np.argsort(axes)
-                self.grad += np.transpose(out.grad, inverse_axes)
+                inverse_axes = self.xp.argsort(self.xp.asarray(axes))
+                if hasattr(inverse_axes, 'tolist'):
+                    inverse_axes = tuple(inverse_axes.tolist())
+                else:
+                    inverse_axes = tuple(inverse_axes)
+
+                self.grad += self.xp.transpose(out.grad, inverse_axes)
         out._backward = _backward
         return out
 
@@ -39,11 +63,11 @@ class Tensor:
         return out
 
     def gather(self, indices):
-        indices = np.asarray(indices)
-        if not np.issubdtype(indices.dtype, np.integer):
+        indices = self.xp.asarray(indices)
+        if not self.xp.issubdtype(indices.dtype, self.xp.integer):
             raise TypeError("gather indices must be integers")
-        indices = indices.astype(np.intp, copy=False)
-        if np.any(indices < 0) or np.any(indices >= self.data.size):
+        indices = indices.astype(self.xp.intp, copy=False)
+        if self.xp.any(indices < 0) or self.xp.any(indices >= self.data.size):
             indices_zero = [i for i in indices if i < 0]
             indices_more = [i for i in indices if i >= self.data.size]
             print(indices_zero)
@@ -54,7 +78,7 @@ class Tensor:
 
         def _backward():
             if self.requires_grad:
-                np.add.at(self.grad.reshape(-1), indices.reshape(-1), out.grad.reshape(-1))
+                self.xp.add.at(self.grad.reshape(-1), indices.reshape(-1), out.grad.reshape(-1))
 
         out._backward = _backward
         return out
@@ -67,7 +91,7 @@ class Tensor:
             if source != target and source != 1: 
                 raise ValueError(f"Can not Broadcast shape: from {self.shape} to {shape}")
 
-        out = Tensor(np.broadcast_to(self.data, shape), (self, ), requires_grad= self.requires_grad, _op ='broadcast_to')
+        out = Tensor(self.xp.broadcast_to(self.data, shape), (self, ), requires_grad= self.requires_grad, _op ='broadcast_to')
         def _backward(): 
             if self.requires_grad: 
                 self._accumulate_grad(out.grad, self)
@@ -79,13 +103,13 @@ class Tensor:
         out = Tensor(self.data[key], (self, ), requires_grad= self.requires_grad, _op=f'getitem: {key}')
         def _backward(): 
             if self.requires_grad: 
-                np.add.at(self.grad, key, out.grad)
+                self.xp.add.at(self.grad, key, out.grad)
         out._backward = _backward
         return out
 
     def requires_grad_(self, requires_grad: bool):
         self.requires_grad = requires_grad
-        self.grad = np.zeros_like(self.data) if self.requires_grad else None
+        self.grad = self.xp.zeros_like(self.data) if self.requires_grad else None
 
     def __add__(self, other):
         other = other if isinstance(other, Tensor) else Tensor(other, requires_grad=self.requires_grad)
@@ -125,18 +149,18 @@ class Tensor:
 
     def __pow__(self, value): 
         assert isinstance(value, (int, float))
-        out = Tensor(np.pow(self.data, value), (self, ), requires_grad = self.requires_grad, _op='**')
+        out = Tensor(self.xp.pow(self.data, value), (self, ), requires_grad = self.requires_grad, _op='**')
         def _backward(): 
             if self.requires_grad: 
-                self.grad += (value * np.pow(self.data, value - 1) * out.grad)
+                self.grad += (value * self.xp.pow(self.data, value - 1) * out.grad)
         out._backward = _backward
         return out
 
     def reciprocal(self): 
-        out = Tensor(np.pow(self.data, -1), (self, ), requires_grad=self.requires_grad, _op='reciprocal')
+        out = Tensor(self.xp.pow(self.data, -1), (self, ), requires_grad=self.requires_grad, _op='reciprocal')
         def _backward(): 
             if self.requires_grad:
-                self.grad += (-1 * np.pow(self.data, -2) * out.grad)
+                self.grad += (-1 * self.xp.pow(self.data, -2) * out.grad)
         out._backward = _backward
         return out 
 
@@ -154,7 +178,7 @@ class Tensor:
         out = Tensor(cdata, (self, ), requires_grad=self.requires_grad, _op=f'leaky_relu: {lvalue}')
         def _backward():
             if self.requires_grad:
-                grad = np.ones_like(self.data)
+                grad = self.xp.ones_like(self.data)
                 grad[self.data <= 0] = lvalue
                 self.grad += out.grad * grad
         out._backward = _backward
@@ -164,7 +188,7 @@ class Tensor:
         return self.leaky_relu(0)
 
     def exp(self):
-        out = Tensor(np.exp(self.data), (self,), requires_grad=self.requires_grad, _op='exp')
+        out = Tensor(self.xp.exp(self.data), (self,), requires_grad=self.requires_grad, _op='exp')
         def _backward():
             if self.requires_grad:
                 self.grad += out.grad * out.data
@@ -172,7 +196,7 @@ class Tensor:
         return out
 
     def log(self): 
-        out = Tensor(np.log(self.data), (self, ), requires_grad = self.requires_grad, _op='log')
+        out = Tensor(self.xp.log(self.data), (self, ), requires_grad = self.requires_grad, _op='log')
         def _backward(): 
             if self.requires_grad: 
                 self.grad += out.grad / self.data
@@ -180,7 +204,7 @@ class Tensor:
         return out
 
     def tanh(self): 
-        out = Tensor(np.tanh(self.data), (self, ), requires_grad= self.requires_grad, _op='tanh')
+        out = Tensor(self.xp.tanh(self.data), (self, ), requires_grad= self.requires_grad, _op='tanh')
         def _backward(): 
             if self.requires_grad: 
                 self.grad += out.grad * (1 - out.data ** 2)
@@ -191,16 +215,16 @@ class Tensor:
         return 1 / (1 + (-self).exp())
 
     def max(self, axis = None, keepdims = False): 
-        out = Tensor(np.max(self.data, axis = axis, keepdims = keepdims), (self, ), requires_grad=self.requires_grad, _op='max')
+        out = Tensor(self.xp.max(self.data, axis = axis, keepdims = keepdims), (self, ), requires_grad=self.requires_grad, _op='max')
         def _backward(): 
             if not self.requires_grad: 
                 return None
             grad = out.grad
             if axis is None: 
-                mask = self.data == np.max(self.data)
+                mask = self.data == self.xp.max(self.data)
 
                 if not keepdims: 
-                    grad = np.broadcast_to(grad, self.data.shape)
+                    grad = self.xp.broadcast_to(grad, self.data.shape)
                 self.grad += mask * grad
                 return
 
@@ -211,26 +235,27 @@ class Tensor:
             )
             if not keepdims: 
                 for ax in axes: 
-                    grad = np.expand_dims(grad, ax)
-            max_values = np.max(self.data, axis = axis, keepdims=True)
+                    grad = self.xp.expand_dims(grad, ax)
+            max_values = self.xp.max(self.data, axis = axis, keepdims=True)
             mask = self.data == max_values
-            grad = np.broadcast_to(grad, self.data.shape)
+            grad = self.xp.broadcast_to(grad, self.data.shape)
             self.grad += grad * mask
         out._backward = _backward
         return out
 
     def min(self, axis = None, keepdims = False): 
-        out = Tensor(np.min(self.data, axis = axis, keepdims = keepdims), (self, ), requires_grad = self.requires_grad, _op = 'min')
+        out = Tensor(self.xp.min(self.data, axis = axis, keepdims = keepdims), (self, ), requires_grad = self.requires_grad, _op = 'min')
         def _backward(): 
             if not self.requires_grad: 
                 return None
             grad = out.grad
             if axis is None: 
-                mask = self.data == np.min(self.data)
+                mask = self.data == self.xp.min(self.data)
 
                 if not keepdims: 
-                    grad = np.broadcast_to(grad, self.data.shape)
+                    grad = self.xp.broadcast_to(grad, self.data.shape)
                 self.grad += mask * grad
+                return
             axes = axis if isinstance(axis, tuple) else (axis, )
             axes = tuple(
                 ax if ax >= 0 else self.data.ndim + ax
@@ -238,33 +263,33 @@ class Tensor:
             )
             if not keepdims: 
                 for ax in axes: 
-                    grad = np.expand_dims(grad, ax)
-            min_values = np.min(self.data, axis = axes, keepdims = True)
+                    grad = self.xp.expand_dims(grad, ax)
+            min_values = self.xp.min(self.data, axis = axes, keepdims = True)
             mask = self.data == min_values
-            grad = np.broadcast_to(grad, self.data.shape)
+            grad = self.xp.broadcast_to(grad, self.data.shape)
             self.grad += grad * mask
         out._backward = _backward
         return out
 
 
     def sum(self, axis = None, keepdims = False):
-        out = Tensor(np.sum( self.data, axis = axis, keepdims = keepdims),(self,),self.requires_grad, _op='sum')
+        out = Tensor(self.xp.sum( self.data, axis = axis, keepdims = keepdims),(self,),self.requires_grad, _op='sum')
 
         def _backward():
             if not self.requires_grad:
                 return
             grad = out.grad
             if axis is None:
-                grad = np.broadcast_to(grad,self.data.shape)
+                grad = self.xp.broadcast_to(grad,self.data.shape)
             else:
                 axes = axis if isinstance(axis, tuple) else (axis,)
                 axes = tuple(ax if ax >= 0 else self.data.ndim + ax for ax in axes)
 
                 if not keepdims:
                     for ax in sorted(axes):
-                        grad = np.expand_dims(grad, ax)
+                        grad = self.xp.expand_dims(grad, ax)
 
-                grad = np.broadcast_to(grad,self.data.shape)
+                grad = self.xp.broadcast_to(grad,self.data.shape)
 
             self.grad += grad
 
@@ -277,7 +302,7 @@ class Tensor:
         else:
             axes = axis if isinstance(axis, tuple) else (axis,)
             axes = tuple( ax if ax >= 0 else self.data.ndim + ax for ax in axes)
-            count = np.prod([self.data.shape[ax] for ax in axes])
+            count = self.xp.prod([self.data.shape[ax] for ax in axes])
         return self.sum(axis = axis, keepdims = keepdims) / count
 
 
@@ -294,14 +319,14 @@ class Tensor:
     def __rtruediv__(self, other):
         return other * self.reciprocal()
 
-    def zero_grad(self): 
-        nodes = self._build_topo()
-        for node in nodes: 
-            node.grad = np.zeros_like(node.grad)
+    def zero_grad(self):
+        for node in self._build_topo():
+            if node.requires_grad:
+                node.grad = self.xp.zeros_like(node.data)
     
     def backward(self): 
         nodes = self._build_topo()
-        self.grad = np.ones_like(self.grad)
+        self.grad = self.xp.ones_like(self.grad)
         for node in nodes:
             node._backward() 
 
@@ -317,17 +342,18 @@ class Tensor:
         return reversed(nodes)
 
     def _accumulate_grad(self, grad, target):
-        while grad.ndim > target.grad.ndim:
-            grad = grad.sum(axis=0)
-        axes = tuple(
-            i
-            for i, (gdim, tdim) in enumerate(zip(grad.shape, target.grad.shape))
-            if tdim == 1 and gdim != 1
-        )
-        if axes:
-            grad = grad.sum(axis=axes, keepdims=True)
+        if target.requires_grad: 
+            while grad.ndim > target.grad.ndim:
+                grad = grad.sum(axis=0)
+            axes = tuple(
+                i
+                for i, (gdim, tdim) in enumerate(zip(grad.shape, target.grad.shape))
+                if tdim == 1 and gdim != 1
+            )
+            if axes:
+                grad = grad.sum(axis=axes, keepdims=True)
 
-        target.grad += grad
+            target.grad += grad
 
     @property
     def shape(self): 
@@ -338,4 +364,4 @@ class Tensor:
         return self.data.ndim
 
     def __repr__(self): 
-        return f'Tensor({self.data}, Shape: {list(self.data.shape)})'
+        return f'Tensor({self.data}, dtype: {self.data.dtype}, Shape: {list(self.data.shape)})'

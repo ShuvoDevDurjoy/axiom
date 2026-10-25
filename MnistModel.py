@@ -1,7 +1,6 @@
 from nn.modules.module import Module
 from nn.modules.linear import Linear
 from nn.modules.conv2d import Conv2D
-import nn.functional as F
 
 
 class MNISTModel(Module):
