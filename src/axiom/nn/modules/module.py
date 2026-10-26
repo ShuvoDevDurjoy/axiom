@@ -1,4 +1,4 @@
-from nn.tensor import Tensor
+from axiom.tensor import Tensor
 class Module: 
     def parameters(self): 
         return 0

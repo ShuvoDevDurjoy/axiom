@@ -1,7 +1,7 @@
 import numpy as np
-from nn.modules.upsample import Upsample
-from nn.tensor import Tensor
-import nn.functional as F
+from axiom.nn.modules.upsample import Upsample
+from axiom.tensor import Tensor
+import axiom.nn.functional as F
 import torch
 
 def main(): 

@@ -1,9 +1,9 @@
-from nn.tensor import Tensor
+from axiom.tensor import Tensor
 import numpy as np
 
-from nn.modules.module import Module
-from nn.init import _get_fan_in_and_fan_out, kaiming_uniform, uniform
-from nn import functional as F
+from axiom.nn.modules.module import Module
+from axiom.init import _get_fan_in_and_fan_out, kaiming_uniform, uniform
+from axiom.nn import functional as F
 
 
 class Conv2D(Module): 

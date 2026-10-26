@@ -1,7 +1,7 @@
-from nn.modules.module import Module
-from nn.init import kaiming_uniform, uniform, _get_fan_in_and_fan_out
+from axiom.nn.modules.module import Module
+from axiom.init import kaiming_uniform, uniform, _get_fan_in_and_fan_out
 import numpy as np
-from nn.tensor import Tensor
+from axiom.tensor import Tensor
 
 class Linear(Module): 
     def __init__(self, in_features, out_features, bias = False):

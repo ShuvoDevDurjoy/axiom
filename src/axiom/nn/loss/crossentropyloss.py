@@ -1,6 +1,6 @@
 import numpy as np
-from nn.functional import log_softmax
-from nn.tensor import Tensor
+from axiom.nn.functional import log_softmax
+from axiom.tensor import Tensor
 
 def cross_entropy(logits, targets): 
     assert isinstance(logits, Tensor)

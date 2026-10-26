@@ -1,7 +1,7 @@
-import nn.tensor as tensor
+import axiom.nn.tensor as tensor
 import numpy as np
-from nn.tensor import Tensor
-from nn._validate import _validate_int_tuple
+from axiom.nn.tensor import Tensor
+from axiom.nn._validate import _validate_int_tuple
 
 
 def sigmoid(x: tensor): 
